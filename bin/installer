@@ -1,0 +1,145 @@
+#!/bin/sh -e
+## -- DELETE1 --
+##:-------------------------------------------------------------------
+#h: Usage: installer [PARAMS...]
+#h:
+#h: This commands read the "InstallFile" file and creates a "install.sh"
+#h: file that automatically downloads and extracts the package.
+#h:
+#h: The "InstallFile" file is a bourne shell script. It contains the
+#h: urls to download in TARFILES variable.
+#h:
+#h: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#h: #H: Help message.
+#h: TARFILES="
+#h:     https://.../PACKAGE--$(uname -s)-$(uname -m).tar.gz
+#h:     ...
+#h: "
+#h: GETURLS() {
+#h:     : Alternative URL calculation.
+#h: }
+#h: POSTINSTALL() {
+#h:     : Executed after installation.
+#h: }
+#h: CHECKUSER() {
+#h:     : Executed before installation to check permissions. It is
+#h:     : skipped if the user specified a DESTDIR.
+#h: }
+#h: DESTDIR=<dir>       # The directory onto which to extract the tars.
+#h: LICENSE_REGEX=REGEX # LICENSE file regex in tars to ask for acceptance.
+#h: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+installer() {
+    if test ! -f "InstallFile"; then
+        echo >&2 "error: InstallFile: File not found."
+        return 1
+    fi
+    echo 'Creating "install.sh" out of "InstallFile" ...'
+    sed '
+    /^\#\# -- DELETE1 --$/,/^\#\# -- DELETE1 --$/d
+    /^\#\# -- DELETE2 --$/,/^\#\# -- DELETE2 --$/d
+    /\#\# *@@@INSTALLER-CONFIG@@@/{
+      r InstallFile
+      a INSTALLER_ENVIRONMENT=y
+    }' "$0" > install.sh
+    case "$(uname -s)" in
+        Windows_NT|MSYS*|CYG*) true;;
+        *) chmod +x install.sh;;
+    esac
+}
+## -- DELETE1 --
+##:-------------------------------------------------------------------
+#H: Usage: [DESTDIR=/tmp][ACCEPT=y] ./install.sh
+#H:
+##:-------------------------------------------------------------------
+installer_main() {
+    local tmpdir u t l a lics
+
+    ## Check user.
+    if test ! -n "${DESTDIR}"; then
+        CHECKUSER
+    fi
+    
+    ## Extract tars.
+    tmpdir="$(mktemp -d)" tars=''
+    for u in $(GETURLS); do
+        t="${tmpdir}/$(basename "$u")"
+        if test -f "${t}"; then
+            true
+        elif which wget >/dev/null 2>&1; then
+            echo "Downloading ${u}"
+            wget -q -O "${t}" "${u}"
+        elif which curl >/dev/null 2>&1; then
+            echo "Downloading ${u}"
+            curl -s -o "${t}" "${u}"
+        else
+            echo >&2 "error: Can't find curl or wget."
+            return 1
+        fi
+        tars="${tars} ${t}"
+    done
+
+    ## Require license acceptance.
+    if test -n "${LICENSE_REGEX}" && test ! @"${ACCEPT:-n}" = @"y"; then
+        for t in ${tars}; do
+            for l in $(tar tf "${t}" | grep "${LICENSE_REGEX}" || true); do
+                if true; then
+                    echo "Legal note from '$(basename ${t})':"
+                    echo ""
+                    tar xOf "${t}" "${l}"
+                    echo ""
+                fi | more -e
+                echo -n "Do you accept the legal note? y/N: "
+                read a
+                if test ! @"${a}" = @"y"; then
+                    echo >&2 "Abort."
+                    return 1
+                fi
+            done
+        done
+    fi
+    
+    ## Install tars.
+    echo "Installing ..."
+    for t in ${tars}; do
+        tar xf "$t" -C "${DESTDIR:-/}" -h -o -m --no-same-permissions
+    done
+
+    ## Post install.
+    POSTINSTALL
+
+    ## Cleanup.
+    rm -rf "${tmpdir}"
+    echo "The installation finished successfully."
+}
+## -------------------------------------------------------------------
+TARFILES=''
+LICENSE_REGEX=''
+GETURLS()     { echo "${TARFILES}"; }
+POSTINSTALL() { true; }
+CHECKUSER() {
+    if test ! -w "/"; then
+        echo >&2 "error: Please execute this script as root."
+        return 1
+    fi
+}
+## -------------------------------------------------------------------
+## @@@INSTALLER-CONFIG@@@
+## -------------------------------------------------------------------
+if test -n "${INSTALLER_ENVIRONMENT}"; then
+    set -e
+    case "${1}" in
+        -h|--help) sed -n 's/^ *#H: \{0,1\}//p' "$0";;
+        *)         installer_main;;
+    esac
+    exit 0
+## -- DELETE2 --
+elif test @"$(basename "$0")" = @"installer"; then
+    case "${1}" in
+        -h|--help) sed -n 's/^ *#h: \{0,1\}//p' "$0";;
+        *)         installer "$@"; exit 0;;
+    esac
+## -- DELETE2 --
+else
+    echo >&2 "error: Do not source 'installer(1)'."
+    exit 1
+fi
