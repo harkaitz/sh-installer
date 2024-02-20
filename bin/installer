@@ -71,6 +71,9 @@ installer_main() {
         elif which curl >/dev/null 2>&1; then
             echo "Downloading ${u}"
             curl -s -o "${t}" "${u}"
+        elif test @"$(uname -s)" = @"OpenBSD"; then
+            echo "Downloading ${u}"
+            ftp -V -o "${t}" "${u}"
         else
             echo >&2 "error: Can't find curl or wget."
             return 1
@@ -85,7 +88,7 @@ installer_main() {
                 if true; then
                     echo "Legal note from '$(basename ${t})':"
                     echo ""
-                    tar xOf "${t}" "${l}"
+                    tar -xzOf "${t}" "${l}"
                     echo ""
                 fi | more -e
                 echo -n "Do you accept the legal note? y/N: "
@@ -101,7 +104,7 @@ installer_main() {
     ## Install tars.
     echo "Installing ..."
     for t in ${tars}; do
-        tar xf "$t" -C "${DESTDIR:-/}" -h -o -m --no-same-permissions
+        tar -xzhom -f "$t" -C "${DESTDIR:-/}"
     done
 
     ## Post install.
